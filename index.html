@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Clear Chat</title>
+<link rel="stylesheet" href="style.css">
+<script>
+window.addEventListener("error", event => {
+  const box = document.getElementById("startupStatus");
+  if (box) { box.hidden = false; box.textContent = "⚠️ Startfehler: " + (event.message || "Ein Skript konnte nicht geladen werden.") + " – bitte F12 → Konsole prüfen."; }
+});
+window.addEventListener("unhandledrejection", event => {
+  const box = document.getElementById("startupStatus");
+  if (box) { box.hidden = false; box.textContent = "⚠️ Verbindungsfehler: " + (event.reason?.message || "Firebase nicht erreichbar."); }
+});
+window.addEventListener("DOMContentLoaded", () => {
+  const box = document.getElementById("startupStatus");
+  if (location.protocol === "file:") {
+    box.hidden = false;
+    box.textContent = "⚠️ Du hast die HTML-Datei direkt geöffnet. Bitte mit Live Server (Go Live) starten: http://127.0.0.1:5500/ statt file:///…";
+  }
+  setTimeout(() => {
+    if (!window.clearChatScriptLoaded && location.protocol !== "file:") {
+      box.hidden = false;
+      box.textContent = "⚠️ JavaScript wurde nicht geladen. Öffne F12 → Konsole und prüfe Internetverbindung und Firebase-Importe.";
+    }
+  }, 4500);
+});
+</script>
+</head>
+<body>
+<div id="startupStatus" role="alert" hidden></div>
+<div class="app">
+<aside class="sidebar">
+  <div class="brand"><div class="brand-symbol">C</div><div><h1>clear chat</h1><p>Raum für Gespräche.</p></div></div>
+  <div class="profile-card"><div class="profile-avatar" id="profileAvatar">?</div><div><strong id="profileName">Dein Profil</strong><p>Dein persönlicher Raum</p></div></div>
+  <div class="section-heading"><span>DEINE CHATS</span><button id="newChatButton" title="Chat erstellen">+</button></div>
+  <div id="chatList" class="chat-list"></div>
+  <button class="join-button" id="joinChatButton">+ Einem Chat beitreten</button>
+  <div class="sidebar-footer"><button id="profileButton">Mein Profil</button><p>Clear Chat · Jugend forscht</p></div>
+</aside>
+<main class="main">
+  <section id="welcomeScreen" class="welcome-screen">
+    <div class="welcome-art"><span class="art-circle one"></span><span class="art-circle two"></span><span class="art-circle three"></span></div>
+    <h2>Gespräche, die verbinden.</h2>
+    <p>Erstelle einen Raum, lade andere ein und entdecke eine neue Art, miteinander zu kommunizieren.</p>
+    <button id="welcomeCreateButton" class="primary-button">Neuen Chat erstellen →</button>
+  </section>
+  <section id="chatScreen" class="chat-screen hidden">
+    <header class="chat-header">
+      <div><h2 id="currentChatName">Gruppenchat</h2><p id="currentChatDescription">Ein Raum für gute Gespräche.</p></div>
+      <div class="header-actions"><button id="inviteButton">Einladen</button><button id="settingsButton">Einstellungen</button><button id="leaveChatButton">Verlassen</button></div>
+    </header>
+    <div id="messages" class="messages" aria-live="polite"></div>
+    <div id="moderationNotice" class="moderation-notice hidden" role="status">
+      <strong>Einen Moment …</strong><p id="moderationText"></p>
+      <div class="moderation-actions"><button id="editMessageButton">Nachricht überarbeiten</button><button id="cancelMessageButton">Verwerfen</button></div>
+    </div>
+    <div class="input-area"><textarea id="messageInput" placeholder="Schreibe eine Nachricht …" maxlength="1000" rows="1"></textarea><button id="sendButton">Senden →</button></div>
+  </section>
+</main>
+</div>
+<div id="profileModal" class="modal hidden"><div class="modal-content"><button class="close-modal" aria-label="Schließen">×</button><h2>Dein Profil</h2><p>Wie möchtest du im Chat erscheinen?</p><label for="usernameInput">Dein Name</label><input id="usernameInput" maxlength="30" placeholder="Dein Name"><label for="userColorInput">Deine Farbe</label><input id="userColorInput" type="color" value="#e76f51"><button id="saveProfileButton" class="primary-button">Profil speichern</button></div></div>
+<div id="createChatModal" class="modal hidden"><div class="modal-content"><button class="close-modal" aria-label="Schließen">×</button><h2>Neuen Raum erstellen</h2><p>Gib deinem Gespräch einen Namen und lege fest, wie ihr miteinander kommunizieren möchtet.</p><label for="newChatName">Name des Chats</label><input id="newChatName" maxlength="50" placeholder="Zum Beispiel: Unsere Klasse"><label for="newChatDescription">Beschreibung</label><input id="newChatDescription" maxlength="150" placeholder="Worum geht es in diesem Chat?"><label for="newChatEmojis">Erlaubte Emojis</label><input id="newChatEmojis" placeholder="😊 ❤️ 👍 😂"><p class="input-help">Leer lassen, um alle Emojis zu erlauben.</p><label for="newChatRules">Individuelle Kommunikationsregeln</label><textarea id="newChatRules" placeholder="Zum Beispiel: Wir lassen einander ausreden."></textarea><button id="createChatConfirm" class="primary-button">Chat erstellen →</button></div></div>
+<div id="joinChatModal" class="modal hidden"><div class="modal-content"><button class="close-modal" aria-label="Schließen">×</button><h2>Chat beitreten</h2><p>Gib den Einladungscode ein, den du erhalten hast.</p><label for="joinChatCode">Einladungscode</label><input id="joinChatCode" placeholder="Code eingeben"><button id="joinChatConfirm" class="primary-button">Beitreten →</button></div></div>
+<div id="inviteModal" class="modal hidden"><div class="modal-content invite-content"><button class="close-modal" aria-label="Schließen">×</button><h2>Menschen verbinden.</h2><p>Teile diesen QR-Code oder verschicke den Einladungslink.</p><div id="qrcode"></div><label>Einladungscode</label><div id="inviteCode" class="invite-code"></div><label for="inviteLink">Einladungslink</label><input id="inviteLink" readonly><button id="copyInviteButton" class="primary-button">Link kopieren</button></div></div>
+<div id="settingsModal" class="modal hidden"><div class="modal-content"><button class="close-modal" aria-label="Schließen">×</button><h2>Raumeinstellungen</h2><p>Gestalte die Regeln für euren gemeinsamen Raum.</p><label for="settingsEmojis">Erlaubte Emojis</label><input id="settingsEmojis" placeholder="😊 ❤️ 👍"><label for="settingsRules">Kommunikationsregeln</label><textarea id="settingsRules"></textarea><label for="settingsTerms">Eigene Begriffe</label><textarea id="settingsTerms" placeholder="Eine Formulierung pro Zeile"></textarea><label for="settingsTandem">Tandem-Formulierungen</label><textarea id="settingsTandem" placeholder="Du nervst! => Ich brauche gerade Ruhe."></textarea><button id="saveSettingsButton" class="primary-button">Einstellungen speichern</button></div></div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+<script type="module" src="script.js"></script>
+</body></html>
