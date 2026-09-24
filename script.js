@@ -7,12 +7,44 @@ window.clearChatScriptLoaded = true;
 const $ = id => document.getElementById(id);
 const showStatus = message => { const el = $("startupStatus"); if (el) { el.hidden = false; el.textContent = message; } };
 let user = null, roomId = null, room = null, unsubscribeRooms = null, unsubscribeRoom = null, unsubscribeMessages = null;
+let joining = false;
+const pendingInvite = new URL(location.href).searchParams.get("join") || "";
+// HIER einmal die tatsächliche GitHub-Pages-Adresse eintragen, z. B.
+// "https://meinname.github.io/ClearChat/" (nicht github.com/... und nicht 127.0.0.1).
+const PUBLIC_APP_URL = "";
+function baseAppUrl() {
+  const configured = PUBLIC_APP_URL.trim();
+  if (configured) {
+    const u = new URL(configured);
+    if (u.protocol !== "https:" || !u.hostname.endsWith("github.io")) throw new Error("PUBLIC_APP_URL muss deine echte https://...github.io/.../-Adresse sein.");
+    u.search = ""; u.hash = ""; return u;
+  }
+  if (location.hostname.endsWith("github.io") && location.protocol === "https:") {
+    const u = new URL(location.href); u.search = ""; u.hash = ""; return u;
+  }
+  throw new Error("Bitte öffne Clear Chat über deinen GitHub-Pages-Link oder trage ihn in script.js bei PUBLIC_APP_URL ein. Live Server (127.0.0.1) funktioniert als Einladung für andere Geräte nicht.");
+}
+function normalizeInvite(raw) {
+  let code = raw.trim();
+  if (code.includes("?join=")) {
+    try { code = new URL(code).searchParams.get("join") || ""; }
+    catch { throw new Error("Der Einladungslink ist ungültig."); }
+  }
+  code = code.trim();
+  if (!/^[A-Za-z0-9]{15,40}$/.test(code)) throw new Error("Bitte einen vollständigen Einladungslink oder einen gültigen Chat-Code eingeben.");
+  return code;
+}
+function clearInviteFromAddress() {
+  const url = new URL(location.href); url.searchParams.delete("join");
+  history.replaceState({},"",url);
+}
+
 let profile; try { profile = JSON.parse(localStorage.getItem("clearChatProfile") || '{"name":"","color":"#e76f51"}'); } catch { profile = {name:"",color:"#e76f51"}; }
 const modalIds = ["profileModal","createChatModal","joinChatModal","inviteModal","settingsModal"];
 function safeError(err) {
   console.error("Clear Chat:", err);
   let message = err?.message || "Ein Fehler ist aufgetreten.";
-  if (err?.code === "permission-denied") message = "Firebase verweigert den Zugriff. Bitte die neuen Firestore-Regeln in der Firebase-Konsole veröffentlichen (siehe START_HIER.txt).";
+  if (err?.code === "permission-denied") message = "Firebase verweigert den Zugriff. Bitte die Firestore-Regeln aus dieser Version veröffentlichen (siehe START_HIER.txt).";
   if (err?.code === "unavailable") message = "Firebase ist gerade nicht erreichbar. Bitte Internetverbindung prüfen.";
   showStatus("⚠️ " + message); alert(message);
 }
@@ -96,7 +128,7 @@ $("saveProfileButton").onclick = () => {
   if (!name || name.length > 30) return alert("Bitte einen Namen mit höchstens 30 Zeichen eingeben.");
   profile = {name,color:$("userColorInput").value};
   localStorage.setItem("clearChatProfile",JSON.stringify(profile)); setProfile(); closeModals();
-  if (user && new URL(location.href).searchParams.get("join")) openModal("joinChatModal");
+  if (user && pendingInvite) void joinRoom(pendingInvite);
 };
 $("newChatButton").onclick = $("welcomeCreateButton").onclick = () => {if (requireProfile()) openModal("createChatModal");};
 $("createChatConfirm").onclick = async () => {
@@ -111,27 +143,37 @@ $("createChatConfirm").onclick = async () => {
       rules:$("newChatRules").value.trim(), terms:"", tandem:"", owner:user.uid, createdAt:serverTimestamp()});
     batch.set(doc(db,"rooms",roomRef.id,"members",user.uid), {joinedAt:serverTimestamp()});
     batch.set(doc(db,"users",user.uid,"rooms",roomRef.id), {name, joinedAt:serverTimestamp()});
-    await batch.commit(); closeModals(); openRoom(roomRef.id);
+    await batch.commit(); closeModals(); $("startupStatus").hidden = true; openRoom(roomRef.id);
   } catch(err) { safeError(err); }
   finally { $("createChatConfirm").disabled = false; }
 };
 $("joinChatButton").onclick = () => {if(requireProfile()) openModal("joinChatModal");};
-$("joinChatConfirm").onclick = async () => {
-  if (!user) return alert("Firebase verbindet sich noch. Bitte kurz warten.");
-  if (!requireProfile()) return;
-  const code = $("joinChatCode").value.trim(); if (!code) return alert("Bitte Einladungscode eingeben.");
-  $("joinChatConfirm").disabled = true;
+async function joinRoom(input) {
+  if (joining) return;
+  if (!user) {showStatus("Verbindung wird aufgebaut. Bitte einen Moment warten …"); return;}
+  if (!profile.name) {openModal("profileModal"); return;}
+  joining = true; $("joinChatConfirm").disabled = true;
+  showStatus("Einladung wird geprüft und Chat wird geöffnet …");
   try {
+    const code = normalizeInvite(input);
+    // Räume dürfen per nicht erratbarem Code einzeln gelesen werden; Listen sind gesperrt.
     const roomSnap = await getDoc(doc(db,"rooms",code));
-    if (!roomSnap.exists()) return alert("Kein Chat zu diesem Code gefunden.");
-    const batch = writeBatch(db);
-    batch.set(doc(db,"rooms",code,"members",user.uid), {joinedAt:serverTimestamp()});
-    batch.set(doc(db,"users",user.uid,"rooms",code), {name:roomSnap.data().name, joinedAt:serverTimestamp()});
-    await batch.commit(); closeModals(); openRoom(code);
-    const url = new URL(location.href); url.searchParams.delete("join"); history.replaceState({},"",url);
+    if (!roomSnap.exists()) throw new Error("Zu diesem Einladungscode wurde kein Chat gefunden. Bitte einen neuen Link schicken lassen.");
+    const memberRef = doc(db,"rooms",code,"members",user.uid);
+    const existingMember = await getDoc(memberRef);
+    if (!existingMember.exists()) {
+      const batch = writeBatch(db);
+      batch.set(memberRef, {joinedAt:serverTimestamp()});
+      batch.set(doc(db,"users",user.uid,"rooms",code), {name:roomSnap.data().name, joinedAt:serverTimestamp()});
+      await batch.commit();
+    }
+    closeModals(); clearInviteFromAddress();
+    $("startupStatus").hidden = true;
+    openRoom(code);
   } catch(err) { safeError(err); }
-  finally { $("joinChatConfirm").disabled = false; }
-};
+  finally { joining = false; $("joinChatConfirm").disabled = false; }
+}
+$("joinChatConfirm").onclick = () => void joinRoom($("joinChatCode").value);
 $("leaveChatButton").onclick = async () => {
   if (!roomId || !confirm("Diesen Chat verlassen?")) return;
   if (room?.owner === user.uid) return alert("Als Ersteller kannst du diesen Chat in dieser Testversion nicht verlassen.");
@@ -156,12 +198,15 @@ $("saveSettingsButton").onclick = async () => {
 };
 $("inviteButton").onclick = () => {
   if (!roomId) return;
-  const url = new URL(location.href); url.searchParams.set("join",roomId);
-  $("inviteCode").textContent = roomId; $("inviteLink").value = url.toString();
-  $("qrcode").replaceChildren();
-  if (typeof QRCode !== "undefined") new QRCode($("qrcode"),{text:url.toString(),width:190,height:190});
-  else $("qrcode").textContent = "QR-Code gerade nicht verfügbar – Link oder Code verwenden.";
-  openModal("inviteModal");
+  try {
+    const url = baseAppUrl(); url.searchParams.set("join",roomId);
+    $("inviteCode").textContent = roomId;
+    $("inviteLink").value = url.toString();
+    $("qrcode").replaceChildren();
+    if (typeof QRCode !== "undefined") new QRCode($("qrcode"),{text:url.toString(),width:190,height:190,correctLevel:QRCode.CorrectLevel.M});
+    else $("qrcode").textContent = "QR-Code konnte nicht geladen werden. Bitte den Link kopieren.";
+    openModal("inviteModal");
+  } catch(err) {safeError(err);}
 };
 $("copyInviteButton").onclick = async () => {
   try { await navigator.clipboard.writeText($("inviteLink").value); alert("Link kopiert!"); }
@@ -176,8 +221,7 @@ onAuthStateChanged(auth,async u => {
   if (u) {
     user = u; const el = $("startupStatus"); if (el && location.protocol !== "file:") el.hidden = true;
     listenRooms();
-    const join = new URL(location.href).searchParams.get("join");
-    if (join) {$("joinChatCode").value = join; openModal(profile.name ? "joinChatModal" : "profileModal");}
+    if (pendingInvite) {$("joinChatCode").value = pendingInvite; if (profile.name) void joinRoom(pendingInvite); else openModal("profileModal");}
     else if (!profile.name) openModal("profileModal");
   } else {
     user = null; showStatus("Verbindung zu Firebase wird aufgebaut …");
